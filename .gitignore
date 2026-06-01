@@ -1,0 +1,12 @@
+# Compiled binaries
+/bin/
+*.exe
+listings-api
+
+# Local env
+.env
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

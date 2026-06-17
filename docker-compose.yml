@@ -19,6 +19,7 @@ services:
     build: .
     environment:
       DATABASE_URL: postgres://listings:listings@db:5432/listings?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
       PORT: "8080"
     ports:
       - "8080:8080"
@@ -26,6 +27,13 @@ services:
       db:
         # Wait until Postgres is actually accepting connections, not just started.
         condition: service_healthy
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
 
 volumes:
   dbdata:

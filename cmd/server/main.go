@@ -32,6 +32,7 @@ func run() error {
 	defer stop()
 
 	dsn := getenv("DATABASE_URL", "postgres://listings:listings@localhost:5432/listings?sslmode=disable")
+	redisURL := getenv("REDIS_URL", "redis://localhost:6379/0")
 	port := getenv("PORT", "8080")
 
 	pool, err := db.Connect(ctx, dsn)
@@ -44,9 +45,17 @@ func run() error {
 		return err
 	}
 
+	rdb, err := db.ConnectRedis(ctx, redisURL)
+	if err != nil {
+		log.Printf("warning: could not connect to redis, caching disabled: %v", err)
+		rdb = nil
+	} else {
+		defer rdb.Close()
+	}
+
 	// Build the dependency graph: repository -> service -> handler.
 	repo := listing.NewPostgresRepository(pool)
-	svc := listing.NewService(repo)
+	svc := listing.NewService(repo, rdb)
 	h := listing.NewHandler(svc)
 
 	mux := http.NewServeMux()

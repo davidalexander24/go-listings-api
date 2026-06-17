@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 // Connect opens a pgx connection pool and verifies it with a ping, so the
@@ -20,6 +21,20 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 	return pool, nil
+}
+
+// ConnectRedis opens a redis connection and verifies it with a ping.
+func ConnectRedis(ctx context.Context, dsn string) (*redis.Client, error) {
+	opts, err := redis.ParseURL(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse redis url: %w", err)
+	}
+	rdb := redis.NewClient(opts)
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		rdb.Close()
+		return nil, fmt.Errorf("ping redis: %w", err)
+	}
+	return rdb, nil
 }
 
 // schemaDDL creates the listings table if it is not already there.

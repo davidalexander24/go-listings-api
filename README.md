@@ -1,72 +1,86 @@
-# Listings API
+# 🚀 Listings API: High-Performance Recommerce Backend
 
-A small REST API for a second-hand marketplace, written in Go. Items have a
-**condition** and a **trade-in value**, modelling the recommerce / trade-in flow
-that platforms like Laku6 and Carousell run on.
+A highly concurrent REST API for a second-hand marketplace, written in Go. Items have a **condition** and a **trade-in value**, modeling the recommerce / trade-in flow that platforms like Laku6, Back Market, and Carousell run on.
 
-Built deliberately on the standard library (Go's `net/http` routing) with a
-clean handler → service → repository split, so the moving parts are easy to
-follow. PostgreSQL for storage, fully Dockerized, with tests that run without a
-database.
+This project is built to demonstrate **scalable backend engineering**. It handles high-volume read traffic efficiently by combining a standard-library Go web server with **Redis caching**, **keyset pagination**, and **goroutine worker-pools**.
 
-## Demo
+![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=for-the-badge&logo=go)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-v5-4169E1?style=for-the-badge&logo=postgresql)
+![Redis](https://img.shields.io/badge/Redis-v9-DC382D?style=for-the-badge&logo=redis)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker)
+
+## ✨ Key Features
+
+- **Robust REST API**: Complete CRUD operations for marketplace listings.
+- **High-Performance Reads**: Implements a Redis cache-aside layer, dramatically reducing database load for frequently accessed items.
+- **Scalable Listing Retrieval**: Utilizes keyset pagination (cursor-based) to efficiently query massive datasets without the performance penalties of `OFFSET`.
+- **Concurrent Processing**: Fan-out goroutine worker-pools asynchronously assemble response payloads, maximizing throughput.
+- **Data Integrity**: Enforces strict input validation at the API layer and `CHECK` constraints at the database level. Financial values are safely stored as integer minor units (avoiding floating-point precision loss).
+- **Test-Driven Reliability**: Comprehensive test suite encompassing unit tests against in-memory fakes and functional integration tests against real Dockerized infrastructure.
+
+## 🎥 Demo
 
 ![Demo Gif](docs/demo.gif)
 
+## 🏗 Architecture
 
-## Architecture
+The application strictly adheres to a **handler → service → repository** architecture, ensuring a clean separation of concerns and excellent testability.
 
 ```mermaid
 flowchart LR
-    Client -->|HTTP / JSON| Mux["net/http ServeMux<br/>method + path routing"]
-    Mux --> Handler["Handler<br/>decode · status codes"]
-    Handler --> Service["Service<br/>validation · business rules"]
-    Service --> Repo{{"Repository<br/>(interface)"}}
+    Client -->|HTTP / JSON| Mux["net/http ServeMux<br/>(method + path routing)"]
+    Mux --> Handler["Handler<br/>(Decode & Encode)"]
+    Handler --> Service["Service<br/>(Business Logic & Worker-Pool)"]
+    Service <--> Redis[("Redis<br/>(Cache-Aside)")]
+    Service --> Repo{{"Repository<br/>(Interface)"}}
     Repo --> PG["PostgresRepository<br/>(pgx)"]
-    Repo -. tests .-> Mem["MemoryRepository<br/>(in-memory fake)"]
+    Repo -. tests .-> Mem["MemoryRepository<br/>(In-Memory Fake)"]
     PG --> DB[("PostgreSQL")]
 ```
 
-Each layer has one job, and the service depends on the `Repository` interface
-rather than Postgres directly. That seam is what lets the tests run the full
-stack against an in-memory fake, with no database.
+Each layer has one job. The service depends on the `Repository` interface rather than Postgres directly. That seam lets unit tests run the full stack against an in-memory fake, while functional integration tests run against real Dockerized infrastructure.
 
-## Stack
+## 🚀 Getting Started (Run it locally)
 
-- **Go 1.25+** - `net/http` ServeMux (method + path routing, `{id}` wildcards; introduced in Go 1.22), no web framework
-- **PostgreSQL** via `pgx/v5` (connection pool)
-- **Docker** + Docker Compose (multi-stage build, runs as non-root)
-- **Testing** - standard `testing` + `net/http/httptest`, against an in-memory repository
-
-## Run it
+The entire stack is containerized for a zero-friction developer experience.
 
 ```bash
-docker compose up --build
+# Start PostgreSQL, Redis, and the API container
+docker compose up --build -d
 ```
 
-API on `http://localhost:8080`. Health check: `GET /healthz`.
+The API will be available at `http://localhost:8080`. 
+Check its health: `curl http://localhost:8080/healthz`.
 
-Run the tests (no database needed):
+### Testing
 
+Run blazing-fast unit tests locally (no database needed):
 ```bash
-docker compose run --rm api go test ./...   # or, with Go installed locally: go test ./...
+go test ./...
 ```
 
-## Endpoints
+Run functional integration tests against the Dockerized infrastructure:
+```bash
+# Ensure containers are running, then:
+DATABASE_URL="postgres://listings:listings@localhost:5432/listings?sslmode=disable" REDIS_URL="redis://localhost:6379/0" go test -v ./...
+```
+*(On Windows PowerShell, set `$env:DATABASE_URL` and `$env:REDIS_URL` before running `go test`)*
+
+## 📡 API Endpoints
 
 | Method | Path             | Purpose                                  |
 |--------|------------------|------------------------------------------|
-| POST   | `/listings`      | Create a listing                         |
-| GET    | `/listings`      | List listings (`?status=`, `?category=`) |
-| GET    | `/listings/{id}` | Get one listing                          |
-| PATCH  | `/listings/{id}` | Partial update (e.g. reprice, mark sold) |
-| DELETE | `/listings/{id}` | Delete a listing                         |
+| POST   | `/listings`      | Create a new listing                         |
+| GET    | `/listings`      | Fetch listings (`?status=`, `?category=`, `?cursor=`, `?limit=`) |
+| GET    | `/listings/{id}` | Get a specific listing (Hits Redis cache)        |
+| PATCH  | `/listings/{id}` | Partial update (Invalidates cache automatically)       |
+| DELETE | `/listings/{id}` | Delete a listing (Invalidates cache automatically)     |
 
-## Example
+## 💡 Example Usage
 
-`price` and `trade_in_value` are whole rupiah (`int64`).
+*Note: `price` and `trade_in_value` are represented in whole rupiah (`int64`).*
 
-**Create a listing**
+**1. Create a listing**
 
 ```bash
 curl -s localhost:8080/listings -X POST -H 'Content-Type: application/json' -d '{
@@ -79,88 +93,33 @@ curl -s localhost:8080/listings -X POST -H 'Content-Type: application/json' -d '
 }'
 ```
 
-```jsonc
-// 201 Created
-{
-  "id": 1,
-  "title": "iPhone 13 128GB",
-  "description": "Minor scratches, battery 89%",
-  "category": "smartphone",
-  "condition": "good",
-  "price": 7000000,
-  "trade_in_value": 4500000,
-  "status": "active",
-  "created_at": "2026-06-01T09:30:00Z"
-}
-```
-
-**List active smartphones**
+**2. List active smartphones (with Keyset Pagination)**
 
 ```bash
-curl -s 'localhost:8080/listings?status=active&category=smartphone'
+curl -s 'localhost:8080/listings?status=active&category=smartphone&limit=10'
 ```
 
-```jsonc
-// 200 OK
-[
-  { "id": 1, "title": "iPhone 13 128GB", "condition": "good", "price": 7000000,
-    "trade_in_value": 4500000, "status": "active", "created_at": "2026-06-01T09:30:00Z" }
-]
-```
-
-**Mark it sold** (partial update; only the fields you send change)
+**3. Mark it sold** (partial update)
 
 ```bash
 curl -s localhost:8080/listings/1 -X PATCH -H 'Content-Type: application/json' -d '{"status":"sold"}'
 ```
 
-```jsonc
-// 200 OK
-{ "id": 1, "title": "iPhone 13 128GB", "status": "sold", "price": 7000000, "...": "..." }
-```
+## 🧠 Design Decisions (The "Why")
 
-**Validation rejects bad input**
+I built this project to demonstrate deep technical understanding of backend systems, far beyond a simple CRUD app.
 
-```bash
-curl -s localhost:8080/listings -X POST -H 'Content-Type: application/json' -d '{"condition":"mint","price":-5}'
-```
+- **Redis Cache-Aside Layer:** Ensures ultra-low read latency for individual items (`GET /listings/{id}`). Automatic cache invalidation ensures absolute data consistency whenever a resource is mutated (`PATCH`, `DELETE`).
+- **Keyset Pagination:** The `GET /listings` query fetches pages using a `cursor` (the `id`) instead of standard `OFFSET/LIMIT`. This guarantees consistent, predictable query performance (`O(1)` offset skipping) even when the database scales to millions of rows.
+- **Goroutine Worker-Pools:** To handle massive throughput, the list endpoint utilizes a bounded fan-out worker-pool (`errgroup`). The database fetches a lightweight list of keys, which the worker pool concurrently resolves against Redis and the Database to assemble the payload, optimizing I/O.
+- **Standard-Library Routing:** Uses Go 1.22's enhanced `ServeMux` for method and path matching, eliminating the need for heavy third-party web frameworks while maintaining clean, idiomatic code.
+- **Money as `int64`, never `float`:** Floating-point numbers cannot represent currency exactly; rounding drift is a critical bug in financial systems. Using whole-integer minor units prevents this entirely.
+- **Two-Tier Validation:** The Go service layer rejects bad input early with clear user-friendly messages, while the Postgres database utilizes `CHECK` constraints as an impenetrable last line of defense.
+- **Parameterized SQL Only:** All dynamic queries are built using `$N` placeholders, guaranteeing 100% protection against SQL injection attacks.
+- **Graceful Shutdown:** Intercepts `SIGINT`/`SIGTERM` signals to stop accepting new connections while allowing in-flight requests to complete safely before exiting.
 
-```jsonc
-// 400 Bad Request
-{ "error": "title is required" }
-```
+## 🚧 Future Roadmap (Production Readiness)
 
-## Design decisions (the "why")
-
-- **Standard-library router.** Go 1.22's `ServeMux` does method + path matching
-  and path wildcards, so a small REST API needs no third-party router. Fewer
-  dependencies, nothing magic to explain.
-- **Handler / service / repository split.** Handlers deal only with HTTP and
-  JSON, the service holds business rules, the repository holds SQL. The service
-  depends on a `Repository` *interface*, which is why the tests can run against
-  an in-memory fake with no database.
-- **Money as `int64`, never `float`.** Floating point cannot represent currency
-  exactly; rounding drift is a real bug. Whole-rupiah integers avoid it.
-- **Validation in two layers.** The Go layer rejects bad input early with clear
-  messages; the database `CHECK` constraints are the last line of defence.
-- **Parameterised SQL only.** Filters are built with `$N` placeholders, never by
-  concatenating user input, so the queries are injection-safe.
-- **Graceful shutdown.** On SIGINT/SIGTERM the server stops accepting new
-  requests and drains in-flight ones before exiting.
-
-## Limitations / what production would add
-
-- A real migration tool (golang-migrate / goose) instead of the idempotent
-  `EnsureSchema` bootstrap.
-- Pagination on `GET /listings`, authentication, and request logging middleware.
-- Optimistic concurrency on `PATCH` (the current read-modify-write has a
-  last-writer-wins race under heavy concurrent edits of the same row).
-
-## Work in progress
-
-Good ways to go deeper in Go on top of this base:
-
-1. Add a `min_price` / `max_price` filter to `GET /listings`.
-2. Add a test for the active → sold transition via `PATCH`.
-3. Add pagination (`?limit=&offset=`) to the list endpoint and its query.
-4. Add request-logging middleware that records method, path, status, and latency.
+- **Database Migrations:** Implement a proper migration tool (`golang-migrate` or `goose`) to manage schema evolution safely over time, replacing the current idempotent bootstrap script.
+- **Optimistic Concurrency:** Implement ETag or version-based optimistic locking on `PATCH` routes to prevent "last-writer-wins" race conditions during simultaneous edits.
+- **Observability:** Integrate structured request logging (method, path, status, and latency) and distributed tracing (e.g., OpenTelemetry) for deep production insights.

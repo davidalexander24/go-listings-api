@@ -13,7 +13,7 @@ import (
 // these tests exercise routing, JSON decoding, the service, and the error
 // mapping together, without needing a running database.
 func newTestServer() *http.ServeMux {
-	svc := NewService(NewMemoryRepository())
+	svc := NewService(NewMemoryRepository(), nil)
 	h := NewHandler(svc)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)

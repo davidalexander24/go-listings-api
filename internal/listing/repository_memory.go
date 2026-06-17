@@ -42,11 +42,29 @@ func (m *MemoryRepository) List(ctx context.Context, f ListFilter) ([]Listing, e
 		if f.Category != "" && l.Category != f.Category {
 			continue
 		}
+		if f.Cursor > 0 && l.ID >= f.Cursor {
+			continue
+		}
 		out = append(out, l)
 	}
 	// Newest first, matching the Postgres ORDER BY.
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
 	return out, nil
+}
+
+func (m *MemoryRepository) ListIDs(ctx context.Context, f ListFilter) ([]int64, error) {
+	listings, err := m.List(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, len(listings))
+	for i, l := range listings {
+		ids[i] = l.ID
+	}
+	return ids, nil
 }
 
 func (m *MemoryRepository) Get(ctx context.Context, id int64) (*Listing, error) {

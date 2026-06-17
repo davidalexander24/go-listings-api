@@ -19,6 +19,7 @@ var ErrNotFound = errors.New("listing not found")
 type Repository interface {
 	Create(ctx context.Context, l *Listing) (*Listing, error)
 	List(ctx context.Context, f ListFilter) ([]Listing, error)
+	ListIDs(ctx context.Context, f ListFilter) ([]int64, error)
 	Get(ctx context.Context, id int64) (*Listing, error)
 	Update(ctx context.Context, l *Listing) (*Listing, error)
 	Delete(ctx context.Context, id int64) error
@@ -70,10 +71,20 @@ func (r *PostgresRepository) List(ctx context.Context, f ListFilter) ([]Listing,
 		args = append(args, f.Category)
 		conds = append(conds, fmt.Sprintf("category = $%d", len(args)))
 	}
+	if f.Cursor > 0 {
+		args = append(args, f.Cursor)
+		conds = append(conds, fmt.Sprintf("id < $%d", len(args)))
+	}
+
 	if len(conds) > 0 {
 		q += " WHERE " + strings.Join(conds, " AND ")
 	}
-	q += " ORDER BY created_at DESC, id DESC"
+	q += " ORDER BY id DESC"
+	
+	if f.Limit > 0 {
+		args = append(args, f.Limit)
+		q += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
 
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -92,6 +103,50 @@ func (r *PostgresRepository) List(ctx context.Context, f ListFilter) ([]Listing,
 		listings = append(listings, l)
 	}
 	return listings, rows.Err()
+}
+
+func (r *PostgresRepository) ListIDs(ctx context.Context, f ListFilter) ([]int64, error) {
+	q := `SELECT id FROM listings`
+	var args []any
+	var conds []string
+	if f.Status != "" {
+		args = append(args, f.Status)
+		conds = append(conds, fmt.Sprintf("status = $%d", len(args)))
+	}
+	if f.Category != "" {
+		args = append(args, f.Category)
+		conds = append(conds, fmt.Sprintf("category = $%d", len(args)))
+	}
+	if f.Cursor > 0 {
+		args = append(args, f.Cursor)
+		conds = append(conds, fmt.Sprintf("id < $%d", len(args)))
+	}
+
+	if len(conds) > 0 {
+		q += " WHERE " + strings.Join(conds, " AND ")
+	}
+	q += " ORDER BY id DESC"
+	
+	if f.Limit > 0 {
+		args = append(args, f.Limit)
+		q += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (r *PostgresRepository) Get(ctx context.Context, id int64) (*Listing, error) {

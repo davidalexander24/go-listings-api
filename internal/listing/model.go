@@ -119,4 +119,6 @@ func (r UpdateListingRequest) Validate() error {
 type ListFilter struct {
 	Status   string
 	Category string
+	Cursor   int64 // Exclusive cursor for keyset pagination
+	Limit    int   // Maximum number of items to return
 }

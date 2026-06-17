@@ -41,9 +41,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
+	cursor, _ := strconv.ParseInt(r.URL.Query().Get("cursor"), 10, 64)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
 	f := ListFilter{
 		Status:   r.URL.Query().Get("status"),
 		Category: r.URL.Query().Get("category"),
+		Cursor:   cursor,
+		Limit:    limit,
 	}
 	listings, err := h.svc.List(r.Context(), f)
 	if err != nil {

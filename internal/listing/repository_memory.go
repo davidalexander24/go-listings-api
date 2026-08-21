@@ -31,7 +31,14 @@ func (m *MemoryRepository) Create(ctx context.Context, l *Listing) (*Listing, er
 	return &cp, nil
 }
 
-func (m *MemoryRepository) List(ctx context.Context, f ListFilter) ([]Listing, error) {
+// list is the in-memory equivalent of the keyset query. It is unexported
+// because the Repository port no longer carries a whole-row List: the service
+// asks for ids and then for bodies.
+//
+// The mutex is held across the whole filter-and-sort, which is fine for a test
+// fake but is not how the Postgres path behaves under concurrency.
+func (m *MemoryRepository) list(ctx context.Context, f ListFilter) ([]Listing, error) {
+	f.Normalize()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]Listing, 0, len(m.items))
@@ -56,7 +63,7 @@ func (m *MemoryRepository) List(ctx context.Context, f ListFilter) ([]Listing, e
 }
 
 func (m *MemoryRepository) ListIDs(ctx context.Context, f ListFilter) ([]int64, error) {
-	listings, err := m.List(ctx, f)
+	listings, err := m.list(ctx, f)
 	if err != nil {
 		return nil, err
 	}
@@ -96,4 +103,18 @@ func (m *MemoryRepository) Delete(ctx context.Context, id int64) error {
 	}
 	delete(m.items, id)
 	return nil
+}
+
+// GetByIDs mirrors the Postgres batch fetch: ids that are not present are
+// simply absent from the result, and order is not guaranteed.
+func (m *MemoryRepository) GetByIDs(ctx context.Context, ids []int64) ([]Listing, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Listing, 0, len(ids))
+	for _, id := range ids {
+		if l, ok := m.items[id]; ok {
+			out = append(out, l)
+		}
+	}
+	return out, nil
 }

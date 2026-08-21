@@ -16,11 +16,16 @@ var ErrNotFound = errors.New("listing not found")
 // Repository is the persistence port for listings. The service depends on this
 // interface rather than on Postgres directly, which is what lets the tests swap
 // in an in-memory fake (see repository_memory.go) and run without a database.
+//
+// Reads are split into ListIDs (which ids are on this page) and GetByIDs (fetch
+// these ids in one round trip). That split is what lets the cache sit in the
+// middle: ids come from Postgres, the bodies come from Redis where possible,
+// and only the misses reach the database.
 type Repository interface {
 	Create(ctx context.Context, l *Listing) (*Listing, error)
-	List(ctx context.Context, f ListFilter) ([]Listing, error)
 	ListIDs(ctx context.Context, f ListFilter) ([]int64, error)
 	Get(ctx context.Context, id int64) (*Listing, error)
+	GetByIDs(ctx context.Context, ids []int64) ([]Listing, error)
 	Update(ctx context.Context, l *Listing) (*Listing, error)
 	Delete(ctx context.Context, id int64) error
 }
@@ -56,56 +61,15 @@ RETURNING ` + columns
 	return scanListing(row)
 }
 
-func (r *PostgresRepository) List(ctx context.Context, f ListFilter) ([]Listing, error) {
-	// Build the WHERE clause dynamically, but only ever with $N placeholders.
-	// User input goes through args, never string concatenation, so this is
-	// safe from SQL injection.
-	q := `SELECT ` + columns + ` FROM listings`
-	var args []any
-	var conds []string
-	if f.Status != "" {
-		args = append(args, f.Status)
-		conds = append(conds, fmt.Sprintf("status = $%d", len(args)))
-	}
-	if f.Category != "" {
-		args = append(args, f.Category)
-		conds = append(conds, fmt.Sprintf("category = $%d", len(args)))
-	}
-	if f.Cursor > 0 {
-		args = append(args, f.Cursor)
-		conds = append(conds, fmt.Sprintf("id < $%d", len(args)))
-	}
-
-	if len(conds) > 0 {
-		q += " WHERE " + strings.Join(conds, " AND ")
-	}
-	q += " ORDER BY id DESC"
-
-	if f.Limit > 0 {
-		args = append(args, f.Limit)
-		q += fmt.Sprintf(" LIMIT $%d", len(args))
-	}
-
-	rows, err := r.pool.Query(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	// Start from an empty (non-nil) slice so the JSON response is [] not null.
-	listings := make([]Listing, 0)
-	for rows.Next() {
-		var l Listing
-		if err := rows.Scan(&l.ID, &l.Title, &l.Description, &l.Category, &l.Condition,
-			&l.Price, &l.TradeInValue, &l.Status, &l.CreatedAt); err != nil {
-			return nil, err
-		}
-		listings = append(listings, l)
-	}
-	return listings, rows.Err()
-}
-
+// ListIDs returns the ids on one keyset page, newest first.
+//
+// Only ids are selected: the bodies are resolved separately so the cache gets a
+// chance at them first. The WHERE clause is built dynamically, but only ever
+// with $N placeholders — user input travels in args, never in the string, so
+// this is safe from SQL injection.
 func (r *PostgresRepository) ListIDs(ctx context.Context, f ListFilter) ([]int64, error) {
+	f.Normalize()
+
 	q := `SELECT id FROM listings`
 	var args []any
 	var conds []string
@@ -127,10 +91,10 @@ func (r *PostgresRepository) ListIDs(ctx context.Context, f ListFilter) ([]int64
 	}
 	q += " ORDER BY id DESC"
 
-	if f.Limit > 0 {
-		args = append(args, f.Limit)
-		q += fmt.Sprintf(" LIMIT $%d", len(args))
-	}
+	// Always bounded. Normalize guarantees a positive limit, so there is no
+	// path here that emits an unlimited query.
+	args = append(args, f.Limit)
+	q += fmt.Sprintf(" LIMIT $%d", len(args))
 
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -138,7 +102,7 @@ func (r *PostgresRepository) ListIDs(ctx context.Context, f ListFilter) ([]int64
 	}
 	defer rows.Close()
 
-	ids := make([]int64, 0)
+	ids := make([]int64, 0, f.Limit)
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
@@ -156,6 +120,34 @@ func (r *PostgresRepository) Get(ctx context.Context, id int64) (*Listing, error
 		return nil, ErrNotFound
 	}
 	return l, err
+}
+
+// GetByIDs fetches many listings in a single round trip via `= ANY($1)`.
+//
+// Ids that do not exist are simply absent from the result; the caller decides
+// what a missing row means. Order is not guaranteed and callers must not rely
+// on it — the service reassembles pages from the id list it already has.
+func (r *PostgresRepository) GetByIDs(ctx context.Context, ids []int64) ([]Listing, error) {
+	if len(ids) == 0 {
+		return []Listing{}, nil
+	}
+	const q = `SELECT ` + columns + ` FROM listings WHERE id = ANY($1)`
+	rows, err := r.pool.Query(ctx, q, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]Listing, 0, len(ids))
+	for rows.Next() {
+		var l Listing
+		if err := rows.Scan(&l.ID, &l.Title, &l.Description, &l.Category, &l.Condition,
+			&l.Price, &l.TradeInValue, &l.Status, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 func (r *PostgresRepository) Update(ctx context.Context, l *Listing) (*Listing, error) {

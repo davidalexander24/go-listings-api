@@ -118,10 +118,19 @@ func TestIntegration_ListingAPI(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("List failed: expected 200, got %d", rec.Code)
 	}
-	var listResp []Listing
-	json.Unmarshal(rec.Body.Bytes(), &listResp)
-	if len(listResp) == 0 {
+	var listResp listResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("failed to unmarshal list response: %v", err)
+	}
+	if len(listResp.Data) == 0 {
 		t.Fatalf("expected at least one listing in list response")
+	}
+	if len(listResp.Data) > 5 {
+		t.Fatalf("requested limit=5, got %d items", len(listResp.Data))
+	}
+	// A full page must carry a cursor; the seeded table is far larger than 5.
+	if len(listResp.Data) == 5 && listResp.NextCursor == nil {
+		t.Fatalf("full page returned no next_cursor")
 	}
 
 	// 6. Delete the Listing

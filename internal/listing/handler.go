@@ -40,22 +40,48 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, created)
 }
 
-func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	cursor, _ := strconv.ParseInt(r.URL.Query().Get("cursor"), 10, 64)
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+// listResponse is the wire shape of a page. The cursor is returned explicitly
+// rather than left for the client to infer from the last element, which is what
+// a bare array forced it to do.
+type listResponse struct {
+	Data       []Listing `json:"data"`
+	NextCursor *int64    `json:"next_cursor"`
+}
 
+func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
 	f := ListFilter{
-		Status:   r.URL.Query().Get("status"),
-		Category: r.URL.Query().Get("category"),
-		Cursor:   cursor,
-		Limit:    limit,
+		Status:   q.Get("status"),
+		Category: q.Get("category"),
 	}
-	listings, err := h.svc.List(r.Context(), f)
+
+	// Parse errors are rejected rather than swallowed. Silently treating
+	// ?limit=abc as "unbounded" is how a typo turns into a full table read.
+	if raw := q.Get("cursor"); raw != "" {
+		cursor, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || cursor < 0 {
+			writeJSON(w, http.StatusBadRequest, errorBody{"cursor must be a non-negative integer"})
+			return
+		}
+		f.Cursor = cursor
+	}
+	if raw := q.Get("limit"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 1 {
+			writeJSON(w, http.StatusBadRequest, errorBody{"limit must be a positive integer"})
+			return
+		}
+		// Above MaxLimit is clamped, not rejected: asking for too much is a
+		// reasonable thing for a client to do, and the bound is documented.
+		f.Limit = limit
+	}
+
+	page, err := h.svc.List(r.Context(), f)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, listings)
+	writeJSON(w, http.StatusOK, listResponse{Data: page.Items, NextCursor: page.NextCursor})
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {

@@ -122,3 +122,27 @@ type ListFilter struct {
 	Cursor   int64 // Exclusive cursor for keyset pagination
 	Limit    int   // Maximum number of items to return
 }
+
+// Page-size policy. Before these existed, an absent or unparseable limit meant
+// "no LIMIT clause at all", so a bare GET /listings read the entire table and
+// then assembled every row of it. DefaultLimit is what a caller gets for asking
+// nothing; MaxLimit is the most any caller can ask for.
+const (
+	DefaultLimit = 20
+	MaxLimit     = 100
+)
+
+// Normalize clamps the page size into range. It lives on the filter rather
+// than in the handler so that every path to the database inherits the bound,
+// including callers that build a ListFilter directly.
+func (f *ListFilter) Normalize() {
+	if f.Limit <= 0 {
+		f.Limit = DefaultLimit
+	}
+	if f.Limit > MaxLimit {
+		f.Limit = MaxLimit
+	}
+	if f.Cursor < 0 {
+		f.Cursor = 0
+	}
+}

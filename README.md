@@ -131,9 +131,9 @@ Replacing the fan-out with one `MGET` for the whole page and one
 |---|---|---|
 | SQL queries per cold page | 51 | **2** |
 | Redis round trips per cold page | 50 | **1** |
-| Throughput, 50 VUs | 680 req/s | **3,559 req/s** |
-| p95 under load | 84 ms | **25 ms** |
-| p99 under load | 127 ms | **34 ms** |
+| Throughput, 50 VUs | 702 req/s | **4,054 req/s** |
+| p95 under load | 82.8 ms | **22.1 ms** |
+| p99 under load | 109.8 ms | **29.5 ms** |
 
 The worker pool is gone. Nothing replaced it, because nothing needed to.
 

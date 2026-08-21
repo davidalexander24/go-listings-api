@@ -24,6 +24,14 @@ useful for **before/after comparison of a code change**, which is the only thing
 they are used for here. They are not a capacity estimate for a real deployment
 and should not be read as one.
 
+**Measurement conditions.** Every timing below was taken with Postgres statement
+logging **off**, and each before/after pair was measured on the same rig in the
+same session, with the "before" side obtained by checking out the pre-change
+commit and dropping the index rather than by reasoning about it. The query
+*counts* in the next section necessarily required `log_statement='all'`, which
+is why they are reported as counts and never as timings: an early draft of this
+file mixed the two and had to be re-measured.
+
 ## Method
 
 Reproducible from a clean checkout:
@@ -82,21 +90,25 @@ Single-request latency, 20 samples, Redis flushed before each cold sample:
 
 | Stage | Cold p50 | Cold p95 | Warm p50 | Warm p95 |
 |---|---|---|---|---|
-| Baseline (per-id fan-out) | 13.2 ms | 15.2 ms | 7.1 ms | 7.7 ms |
-| Batch read | 6.1 ms | 7.9 ms | 5.2 ms | 5.4 ms |
-| Batch read + index | **6.0 ms** | **6.9 ms** | **4.9 ms** | 6.4 ms |
+| Baseline (per-id fan-out, no index) | 12.7 ms | 15.0 ms | 7.0 ms | 8.2 ms |
+| Batch read + index | **5.6 ms** | **7.6 ms** | **4.9 ms** | **5.3 ms** |
+
+The cold gap is the N+1: 50 sequential cache misses, each costing a round trip
+to Redis and then to Postgres. Warm, both versions serve the page from cache and
+the difference narrows to the 50-GET-vs-1-MGET round-trip cost.
 
 Under sustained load, 50 VUs for 30s, cursor-walking 5 pages per iteration:
 
 | Stage | Throughput | p50 | p95 | p99 | Failures |
 |---|---|---|---|---|---|
-| Baseline (per-id fan-out) | 680 req/s | 70.8 ms | 84.0 ms | 127.1 ms | 0 |
-| Batch read | 3,407 req/s | 11.3 ms | 26.3 ms | 34.7 ms | 0 |
-| Batch read + index | **3,559 req/s** | **10.6 ms** | **25.5 ms** | **34.1 ms** | 0 |
+| Baseline (per-id fan-out, no index) | 702 req/s | 68.4 ms | 82.8 ms | 109.8 ms | 0 |
+| Batch read, no index | 3,538 req/s | 10.8 ms | 25.1 ms | 33.4 ms | 0 |
+| Batch read + index | **4,054 req/s** | **9.3 ms** | **22.1 ms** | **29.5 ms** | 0 |
 
-**5.2x throughput, p95 down 70%.** Almost all of it comes from the batch read;
-the index adds about 4% here because, as the next section explains, this query
-was never the one the index rescues.
+**5.8x throughput, p95 down 73%.** Most of it is the batch read; the index adds
+a further 15% on this query, which is a bonus rather than its purpose. As the
+next section explains, this particular filter was never the one the index
+rescues.
 
 ## GET /listings/{id} — regression check
 
@@ -106,11 +118,13 @@ changed; it is measured to confirm the list work did not regress it.
 | Stage | Throughput | p50 | p95 | p99 |
 |---|---|---|---|---|
 | Baseline | 14,394 req/s | 2.75 ms | 6.84 ms | 10.0 ms |
-| After changes | 13,923 req/s | 2.87 ms | 7.13 ms | 10.0 ms |
+| After changes | 14,238 req/s | 2.83 ms | 6.82 ms | 9.6 ms |
 
-Within run-to-run variance on a single-box rig. Treat this as unchanged rather
-than as a 3% regression: the difference is smaller than the spread between
-repeat runs.
+Unchanged within run-to-run variance, which is the result this check was looking
+for. (The baseline row here was captured while statement logging was still on.
+The single-item path issues one query either way, so logging barely touches it,
+and the two figures agree to within 1% — but the asymmetry is noted rather than
+hidden.)
 
 ## Index selection
 

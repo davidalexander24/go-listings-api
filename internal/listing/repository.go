@@ -80,7 +80,7 @@ func (r *PostgresRepository) List(ctx context.Context, f ListFilter) ([]Listing,
 		q += " WHERE " + strings.Join(conds, " AND ")
 	}
 	q += " ORDER BY id DESC"
-	
+
 	if f.Limit > 0 {
 		args = append(args, f.Limit)
 		q += fmt.Sprintf(" LIMIT $%d", len(args))
@@ -126,7 +126,7 @@ func (r *PostgresRepository) ListIDs(ctx context.Context, f ListFilter) ([]int64
 		q += " WHERE " + strings.Join(conds, " AND ")
 	}
 	q += " ORDER BY id DESC"
-	
+
 	if f.Limit > 0 {
 		args = append(args, f.Limit)
 		q += fmt.Sprintf(" LIMIT $%d", len(args))

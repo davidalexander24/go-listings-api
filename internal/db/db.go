@@ -54,7 +54,24 @@ CREATE TABLE IF NOT EXISTS listings (
     trade_in_value BIGINT      NOT NULL DEFAULT 0 CHECK (trade_in_value >= 0),
     status         TEXT        NOT NULL DEFAULT 'active' CHECK (status IN ('active','sold')),
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-);`
+);
+
+-- Supports the keyset list query: WHERE status = ? AND category = ?
+-- ORDER BY id DESC LIMIT ?. Column order matters — the two equality
+-- predicates come first, then the ordering column, so Postgres can seek
+-- straight to the right slice of the index and read it in order.
+--
+-- Because the list query selects only id, this is an Index Only Scan: the
+-- heap is never touched. Measured on 1M rows (docs/benchmarks.md), the case
+-- this actually rescues is a filter that matches nothing recent, which
+-- without the index degrades to a parallel sequential scan of the whole
+-- table: 68 ms and 19,367 buffers, versus 0.083 ms and 3 with it.
+--
+-- A partial index over WHERE status = 'active' was measured too. It is 13 MB
+-- smaller and marginally slower on the common path, but it leaves every
+-- status = 'sold' query on the primary-key scan, so it was not chosen.
+CREATE INDEX IF NOT EXISTS listings_status_category_id_desc_idx
+    ON listings (status, category, id DESC);`
 
 // EnsureSchema runs the idempotent DDL above. This is a pragmatic bootstrap, not
 // a migration tool: production would use a versioned migration runner

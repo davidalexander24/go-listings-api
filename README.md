@@ -12,7 +12,7 @@ intuition.
 **Stack:** Go 1.26 (stdlib `net/http`, no framework) · PostgreSQL 16 via pgx ·
 Redis 7 · Docker Compose · k6
 
-<video src="https://github.com/user-attachments/assets/db5f6327-91a1-4d0c-8581-e74139decc56" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/85be1618-6c44-4975-b684-8915c192383c" controls width="100%"></video>
 
 ![List endpoint throughput before and after: 702 requests per second at 51 queries per page, versus 4,054 requests per second at 2 queries per page](docs/throughput.svg)
 

@@ -12,7 +12,9 @@ intuition.
 **Stack:** Go 1.26 (stdlib `net/http`, no framework) · PostgreSQL 16 via pgx ·
 Redis 7 · Docker Compose · k6
 
-<video src="https://github.com/user-attachments/assets/85be1618-6c44-4975-b684-8915c192383c" controls width="100%"></video>
+[![Go Listings API benchmark and verification demo](docs/demo.gif)](docs/demo.mp4)
+
+*Seeding a million rows, keyset pagination via curl and jq, and verifying the query count with cold Redis (2) and warm Redis (1). [▶ Watch full video (MP4)](docs/demo.mp4)*
 
 ![List endpoint throughput before and after: 702 requests per second at 51 queries per page, versus 4,054 requests per second at 2 queries per page](docs/throughput.svg)
 
